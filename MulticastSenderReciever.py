@@ -22,7 +22,8 @@ MULTICAST_PORT = 2000
 MULTICAST_ADDRESS_PORT = (MULTICAST_ADDRESS, MULTICAST_PORT)
 
 # Ethernet/Wi-Fi interface address
-IFACE_ADDRESS = "192.168.1.22"
+#IFACE_ADDRESS = "192.168.1.22"
+IFACE_ADDRESS = "127.0.0.1"
 
 ########################################################################
 # Multicast Sender
