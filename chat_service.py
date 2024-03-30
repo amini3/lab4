@@ -6,15 +6,17 @@ import socket
 import argparse
 import sys
 import time
+import json
 
 ########################################################################
 # Echo Server class
 ########################################################################
 
 CMD_FIELD_LEN =1
-IP_ADDR_LEN =15
-IP_PORT_LEN =1
+IP_ADDR_LEN = 4
+IP_PORT_LEN = 3
 CHATROOMSIZEBYTES=4
+
 CMD = {
     "getdir"        : b'\x01',
     "makeroom"      : b'\x02',
@@ -50,7 +52,7 @@ def recv_bytes(sock, bytecount_target):
     # status.
     except socket.timeout:
         sock.settimeout(None)        
-        print("recv_bytes: Recv socket timeout!")
+        # print("recv_bytes: Recv socket timeout!")
         return (False, b'')
 
 class Server:
@@ -62,6 +64,8 @@ class Server:
     BACKLOG = 10
     
     MSG_ENCODING = "utf-8"
+
+    roomDirectory = {}
 
     def __init__(self):
         self.create_listen_socket()
@@ -150,7 +154,11 @@ class Server:
                 cmd = int.from_bytes(cmd_field, byteorder='big')
                 
                 if cmd == int.from_bytes(CMD['makeroom'], byteorder='big'):
-                    self.make_room()
+                    self.make_room(connection)
+                elif cmd == int.from_bytes(CMD['deleteroom'], byteorder='big'):
+                    self.deleteRoom(connection)
+                elif cmd == int.from_bytes(CMD['getdir'], byteorder='big'):
+                    self.getDir(connection)
                     #self.connected_clients.remove(client)
                     #connection.close()
                     #continue
@@ -165,18 +173,89 @@ class Server:
 
     def make_room(self, connection):
         # Decoding Chat Room Name  
-        chatRoomNameSizeInBytes = recv_bytes(connection, CHATROOMSIZEBYTES)
-        chatRoomNameSize = int(chatRoomNameSizeInBytes.decode(Server.MSG_ENCODING))
+        _, chatRoomNameSizeInBytes = recv_bytes(connection, CHATROOMSIZEBYTES)
+        chatRoomNameSize = int.from_bytes(chatRoomNameSizeInBytes, byteorder='big')
         
-        chatRoomNameBytes = recv_bytes(connection, chatRoomNameSize)
+        _, chatRoomNameBytes = recv_bytes(connection, chatRoomNameSize)
         chatRoomName = chatRoomNameBytes.decode(Server.MSG_ENCODING)
 
         # Decoding Multicast I.P address 
-        IPaddressBytes = recv_bytes(connection, IP)
+        _, IPaddressSizeInBytes = recv_bytes(connection, IP_ADDR_LEN)
+        IPaddressSize = int.from_bytes(IPaddressSizeInBytes, byteorder='big')
 
+        _, IPaddressBytes = recv_bytes(connection, IPaddressSize)
+        IPaddress = IPaddressBytes.decode(Server.MSG_ENCODING)
 
-        # Decoding 
+        # Decoding Port
+        _, PortSizeInBytes = recv_bytes(connection, IP_PORT_LEN)
+        PortSize = int.from_bytes(PortSizeInBytes, byteorder='big')
 
+        _, PortBytes = recv_bytes(connection, PortSize)
+        Port = PortBytes.decode(Server.MSG_ENCODING) 
+
+        # Updating Our Global Directory
+        self.updateDir(chatRoomName, IPaddress, Port) 
+        return
+
+         
+
+    def updateDir(self, name, address, port):
+        
+        dirSize = len(self.roomDirectory)
+
+        self.roomDirectory[dirSize] = {}
+        
+        self.roomDirectory[dirSize]['name'] = name
+        self.roomDirectory[dirSize]['address'] = address
+        self.roomDirectory[dirSize]['port'] = port
+
+        # for dir_id, dir_info in self.roomDirectory.items():
+        #     print("\nChat Room", str(dir_id) + ":")
+
+        #     for key in dir_info:
+        #         print('\t'+ key + ':', dir_info[key])
+
+        return
+
+    def getDir(self, connection):
+
+        # Serializing Dictionary
+        json_data = json.dumps(self.roomDirectory)
+
+        # Encoding Json
+        json_data_bytes = json_data.encode('utf-8')
+
+        # Sending Json String
+        connection.sendall(json_data_bytes)
+
+        return
+        
+
+    def deleteRoom(self, connection):
+
+        _, chatRoomNameSizeInBytes = recv_bytes(connection, CHATROOMSIZEBYTES)
+        chatRoomNameSize = int.from_bytes(chatRoomNameSizeInBytes, byteorder='big')
+        
+        _, chatRoomNameBytes = recv_bytes(connection, chatRoomNameSize)
+        chatRoomName = chatRoomNameBytes.decode(Server.MSG_ENCODING)
+        
+        
+        for key, value in self.roomDirectory.items():
+            if value['name'] == chatRoomName:
+                last_key = list(self.roomDirectory.keys())[-1]
+                if(self.roomDirectory[last_key] == self.roomDirectory[key]):
+                    self.roomDirectory.pop(last_key)
+                else:
+                    del self.roomDirectory[key]
+                    self.roomDirectory[key]= self.roomDirectory.pop(last_key)
+                return
+
+        # for dir_id, dir_info in self.roomDirectory.items():
+        #     print("\nChat Room", str(dir_id) + ":")
+        #     for key in dir_info:
+        #         print('\t'+ key + ':', dir_info[key])
+
+        # return
 
 class Client:
 
@@ -236,43 +315,85 @@ class Client:
         # In this version we keep prompting the user until a non-blank
         # line is entered, i.e., ignore blank lines.
         print("You are connected to the Chat Room Directory Server (CRDS)\n")
-        self.input_text = input("CRDS Input: ")
-        if self.input_text == "getdir":
-            pass
-        elif "makeroom" in self.input_text:
-            command_str = self.input_text.split()
-            name = command_str[1]
-            ip = command_str[2]
-            port = command_str[3]
-            self.makeroom(name,ip,port) #add input arguments
+        
+        try:
             
-        elif "deleteroom" in self.input_text:
-            command_str = self.input_text.split()
-            name = command_str[1]
-            self.deleteroom(name)
-            pass
-        elif(self.input_text=="bye"):
-            pass
-        else:
-            print("Error")
+            while True:
+                self.input_text = input("CRDS Input: ")
+
+                if self.input_text == "getdir":
+                    self.getDir()
+                elif "makeroom" in self.input_text:
+                    command_str = self.input_text.split()
+                    name = command_str[1]
+                    ip = command_str[2]
+                    port = command_str[3]
+                    self.makeroom(name,ip,port) #add input arguments                  
+                elif "deleteroom" in self.input_text:
+                    command_str = self.input_text.split()
+                    name = command_str[1]
+                    self.deleteroom(name)
+                    pass
+                elif(self.input_text=="bye"):
+                    pass
+                else:
+                    print("Error")
+                    
+        except KeyboardInterrupt:
+            print("program closed")
 
     def makeroom(self, chatRoomName, ip, port):
         # Build and send the command packet
         cmd_field = CMD["makeroom"]
         
+        chatRoomName_pkt = chatRoomName.encode(Server.MSG_ENCODING)
         get_chatRoomName_size = len(chatRoomName.encode(Server.MSG_ENCODING))
         get_chatRoomName_size_pkt = get_chatRoomName_size.to_bytes(CHATROOMSIZEBYTES,byteorder='big')
 
-        #args_field = f"{chatRoomName} {ip} {port}".encode(Server.MSG_ENCODING)
-        args_field = (chatRoomName +ip+port).encode(Server.MSG_ENCODING)
-        pkt = cmd_field + get_chatRoomName_size_pkt + args_field
 
-        #self.socket.sendall(pkt)
-        #print(pkt)
+        IP_pkt = ip.encode(Server.MSG_ENCODING)
+        get_IP_size = len(ip.encode(Server.MSG_ENCODING))
+        get_IP_size_pkt = get_IP_size.to_bytes(IP_ADDR_LEN,byteorder='big')
 
-        print(len(ip.encode(Server.MSG_ENCODING)))
+        
+        port_pkt = port.encode(Server.MSG_ENCODING)
+        get_port_size = len(port.encode(Server.MSG_ENCODING))
+        get_port_size_pkt = get_port_size.to_bytes(IP_PORT_LEN,byteorder='big')
 
-                
+        pkt = cmd_field + get_chatRoomName_size_pkt + chatRoomName_pkt + get_IP_size_pkt + IP_pkt + get_port_size_pkt + port_pkt
+
+        self.socket.sendall(pkt)
+        return
+
+    def deleteroom(self, chatRoomName):
+        # Build and send the command packet
+        cmd_field = CMD["deleteroom"]
+        
+        chatRoomName_pkt = chatRoomName.encode(Server.MSG_ENCODING)
+        get_chatRoomName_size = len(chatRoomName.encode(Server.MSG_ENCODING))
+        get_chatRoomName_size_pkt = get_chatRoomName_size.to_bytes(CHATROOMSIZEBYTES,byteorder='big')
+
+
+        pkt = cmd_field + get_chatRoomName_size_pkt + chatRoomName_pkt
+
+        self.socket.sendall(pkt)
+        return
+    
+    def getDir(self):
+        # Sending Request Packet To Server
+        cmd_field = CMD['getdir']
+        self.socket.sendall(cmd_field)
+
+        # Wait & Recv the Directory Packet From Server
+        dir_data_bytes = self.socket.recv(Client.RECV_BUFFER_SIZE)
+        dir_data_decoded = dir_data_bytes.decode('utf-8')
+
+        # Read the received message as JSON.
+        dir_object = json.loads(dir_data_decoded)
+        print(dir_object)
+
+
+        
     def connection_send(self):
         try:
             # Send string objects over the connection. The string must
