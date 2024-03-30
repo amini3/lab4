@@ -27,6 +27,7 @@ CLIENT_CMDS = ["connect", "bye", "name", "chat"]
 
 SOCKET_TIMEOUT = 4
 
+
 # Call recv to read bytecount_target bytes from the socket. Return a
 # status (True or False) and the received butes (in the former case).
 def recv_bytes(sock, bytecount_target):
@@ -264,7 +265,12 @@ class Client:
     # SERVER_HOSTNAME = socket.gethostname()
     # SERVER_HOSTNAME = "192.168.1.22"
     SERVER_HOSTNAME = "localhost"
-    
+    RX_BIND_ADDRESS = "0.0.0.0"
+    RX_IFACE_ADDRESS = "127.0.0.1"
+    CLIENTNAME = ""
+
+    TTL = 1 # multicast hop count
+    TTL_BYTE = TTL.to_bytes(1, byteorder='big')
     # Try connecting to the compeng4dn4 echo server. You need to change
     # the destination port to 50007 in the connect function below.
     # SERVER_HOSTNAME = 'compeng4dn4.mooo.com'
@@ -286,8 +292,16 @@ class Client:
 
             # Allow us to bind to the same port right away.            
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Bind the client socket to a particular address/port.
-            # self.socket.bind((Server.HOSTNAME, 40000))
+
+            # Create Intial Multicast Socket That We Will Bind To Later
+            self.rx_multiCastSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+            self.rx_multiCastSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+            
+
+    
+
+            
 
             # Wait for client to enter "CONNECT" command before calling connect_to_server()
             self.user_input_text= input("Enter a command ")
@@ -336,11 +350,97 @@ class Client:
                     pass
                 elif(self.input_text=="bye"):
                     pass
+                elif "name" in self.input_text:
+                    command_str = self.input_text.split()
+                    self.CLIENTNAME = command_str[1] # This Will Be Appended To Every Message That Is Sent
+                elif "chat" in self.input_text:
+                    command_str = self.input_text.split()
+                    name = command_str[1]
+                    self.chatroom()
                 else:
                     print("Error")
                     
         except KeyboardInterrupt:
             print("program closed")
+
+    def create_recieve_socket(self):
+        MULTICAST_ADDRESS = "239.2.2.2" # TEMPORARY
+        # Binding Socket To Multicast Address
+        RX_BIND_ADDRESS_PORT = (Client.RX_BIND_ADDRESS, 2000)
+        self.rx_multiCastSocket.bind(RX_BIND_ADDRESS_PORT)
+
+        multicast_group_bytes = socket.inet_aton(MULTICAST_ADDRESS)
+
+        # Set up the interface to be used.
+        multicast_iface_bytes = socket.inet_aton(Client.RX_IFACE_ADDRESS)
+
+        # Form the multicast request.
+        multicast_request = multicast_group_bytes + multicast_iface_bytes
+
+        # Issue the Multicast IP Add Membership request.
+        print("Adding membership (address/interface): ", MULTICAST_ADDRESS,"/", Client.RX_IFACE_ADDRESS)
+        self.rx_multiCastSocket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, multicast_request)
+        return
+
+    def create_send_socket(self):
+            try:
+                self.tx_multiCastSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+                ############################################################
+                # Set the TTL for multicast.
+
+                self.tx_multiCastSocket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, Client.TTL_BYTE)
+
+                # self.socket.bind((IFACE_ADDRESS, 30000)) # Bind to port 30000.
+                self.tx_multiCastSocket.bind((Client.RX_IFACE_ADDRESS, 0)) # Have the system pick a port number.
+                return
+
+            except Exception as msg:
+                print(msg)
+                sys.exit(1)
+
+    def receive_chat(self):
+        self.rx_multiCastSocket.settimeout(SOCKET_TIMEOUT)
+        try:
+            data, address_port = self.rx_multiCastSocket.recvfrom(Server.RECV_SIZE)
+            address, port = address_port
+            print("Received: {} {}".format(data.decode('utf-8'), address_port))
+            self.rx_multiCastSocket.settimeout(SOCKET_TIMEOUT)
+            return
+        except socket.timeout:
+            self.rx_multiCastSocket.settimeout(None)     
+            #return (False, b'')
+            return
+        except Exception as msg:
+            print(msg)
+            sys.exit(1)
+
+        
+    def chatroom(self):
+        # Intializing RX & TX sockets
+        self.create_recieve_socket()
+        self.create_send_socket()
+
+        while True:
+            try:
+                # Get User Message 
+                tx_chatText = input("Chat Text: ")
+                tx_chatTextBytes = tx_chatText.encode('utf-8')
+
+                # Send Chat 
+                MULTICAST_ADDRESS_PORT = ("239.2.2.2", 2000) # FIX LATER 
+                self.tx_multiCastSocket.sendto(tx_chatTextBytes, MULTICAST_ADDRESS_PORT) # CHANGE TO CHAT 
+
+                # Receive Chat
+                self.receive_chat()
+
+            except Exception as msg:
+                print(msg)
+                sys.exit(1)
+
+            
+
+
 
     def makeroom(self, chatRoomName, ip, port):
         # Build and send the command packet
