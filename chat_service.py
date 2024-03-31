@@ -7,6 +7,8 @@ import argparse
 import sys
 import time
 import json
+import threading
+import asyncio
 
 ########################################################################
 # Echo Server class
@@ -257,6 +259,7 @@ class Server:
         #         print('\t'+ key + ':', dir_info[key])
 
         # return
+    
 
 class Client:
 
@@ -267,7 +270,7 @@ class Client:
     SERVER_HOSTNAME = "localhost"
     RX_BIND_ADDRESS = "0.0.0.0"
     RX_IFACE_ADDRESS = "127.0.0.1"
-    CLIENTNAME = ""
+    CLIENTNAME = "Amaan"
 
     TTL = 1 # multicast hop count
     TTL_BYTE = TTL.to_bytes(1, byteorder='big')
@@ -278,6 +281,7 @@ class Client:
     RECV_BUFFER_SIZE = 1024 # Used for recv.    
     # RECV_BUFFER_SIZE = 5 # Used for recv.    
 
+    RX_FLAG = False
 
     def __init__(self):
         self.get_socket()
@@ -399,44 +403,63 @@ class Client:
                 print(msg)
                 sys.exit(1)
 
-    def receive_chat(self):
-        self.rx_multiCastSocket.settimeout(SOCKET_TIMEOUT)
+    def receive_chat(self): 
+        # self.rx_multiCastSocket.settimeout(SOCKET_TIMEOUT)
         try:
-            data, address_port = self.rx_multiCastSocket.recvfrom(Server.RECV_SIZE)
-            address, port = address_port
-            print("Received: {} {}".format(data.decode('utf-8'), address_port))
-            self.rx_multiCastSocket.settimeout(SOCKET_TIMEOUT)
-            return
-        except socket.timeout:
-            self.rx_multiCastSocket.settimeout(None)     
+            while True:
+                data, address_port = self.rx_multiCastSocket.recvfrom(Server.RECV_SIZE)
+                address, port = address_port
+                print("Received {} from: {} port {}".format(data.decode('utf-8'), Client.CLIENTNAME, address_port))
+
+            # self.rx_multiCastSocket.settimeout(SOCKET_TIMEOUT)
+        #except socket.timeout:
+        #    self.rx_multiCastSocket.settimeout(None)     
             #return (False, b'')
-            return
+            # return
         except Exception as msg:
             print(msg)
             sys.exit(1)
 
+    def get_input(self):
+        while True:
+            # Get User Message 
+            tx_chatText = input("Chat Text: ")
+            tx_chatTextBytes = tx_chatText.encode('utf-8')
+
+            # Send Chat 
+            MULTICAST_ADDRESS_PORT = ("239.2.2.2", 2000) # FIX LATER 
+            self.tx_multiCastSocket.sendto(tx_chatTextBytes, MULTICAST_ADDRESS_PORT) # CHANGE TO CHAT 
+            time.sleep(0.5)
+            
         
     def chatroom(self):
         # Intializing RX & TX sockets
         self.create_recieve_socket()
         self.create_send_socket()
 
+        rx_thread = threading.Thread(target=self.receive_chat, args=())
+        rx_thread.daemon = True
+        rx_thread.start()
+
+        #get_input_thread = threading.Thread(target=self.get_input, args=())
+        #get_input_thread.daemon = True
+        #get_input_thread.start()
+
         while True:
-            try:
-                # Get User Message 
-                tx_chatText = input("Chat Text: ")
-                tx_chatTextBytes = tx_chatText.encode('utf-8')
+            # Get User Message 
+            tx_chatText = input("Chat Text: ")
+            tx_chatTextBytes = tx_chatText.encode('utf-8')
 
-                # Send Chat 
-                MULTICAST_ADDRESS_PORT = ("239.2.2.2", 2000) # FIX LATER 
-                self.tx_multiCastSocket.sendto(tx_chatTextBytes, MULTICAST_ADDRESS_PORT) # CHANGE TO CHAT 
+            # Send Chat 
+            MULTICAST_ADDRESS_PORT = ("239.2.2.2", 2000) # FIX LATER 
+            self.tx_multiCastSocket.sendto(tx_chatTextBytes, MULTICAST_ADDRESS_PORT) # CHANGE TO CHAT 
+            time.sleep(0.5)
 
-                # Receive Chat
-                self.receive_chat()
 
-            except Exception as msg:
-                print(msg)
-                sys.exit(1)
+            # Receive Chat
+            # self.receive_chat()
+
+    
 
             
 
@@ -502,6 +525,7 @@ class Client:
         except Exception as msg:
             print(msg)
             sys.exit(1)
+
 
     def connection_receive(self):
         try:
