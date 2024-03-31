@@ -408,46 +408,36 @@ class Client:
         try:
             while True:
                 data, address_port = self.rx_multiCastSocket.recvfrom(Server.RECV_SIZE)
-                address, port = address_port
-                print("Received {} from: {} port {}".format(data.decode('utf-8'), Client.CLIENTNAME, address_port))
+                rx_ip, rx_port = address_port
+                ### ADD LOGIC TO NOT PRINT OUT IF ADDRESS IS SAME AS OUR OWN
+                tx_ip, tx_port = self.tx_multiCastSocket.getsockname()
+                if (rx_ip == tx_ip) and (rx_port == tx_port):
+                    pass
+                else:
+                    print("{}\n".format(data.decode('utf-8')))
 
-            # self.rx_multiCastSocket.settimeout(SOCKET_TIMEOUT)
-        #except socket.timeout:
-        #    self.rx_multiCastSocket.settimeout(None)     
-            #return (False, b'')
-            # return
+
         except Exception as msg:
             print(msg)
             sys.exit(1)
-
-    def get_input(self):
-        while True:
-            # Get User Message 
-            tx_chatText = input("Chat Text: ")
-            tx_chatTextBytes = tx_chatText.encode('utf-8')
-
-            # Send Chat 
-            MULTICAST_ADDRESS_PORT = ("239.2.2.2", 2000) # FIX LATER 
-            self.tx_multiCastSocket.sendto(tx_chatTextBytes, MULTICAST_ADDRESS_PORT) # CHANGE TO CHAT 
-            time.sleep(0.5)
-            
+         
         
     def chatroom(self):
         # Intializing RX & TX sockets
-        self.create_recieve_socket()
         self.create_send_socket()
+        self.create_recieve_socket()
+        
 
         rx_thread = threading.Thread(target=self.receive_chat, args=())
         rx_thread.daemon = True
         rx_thread.start()
 
-        #get_input_thread = threading.Thread(target=self.get_input, args=())
-        #get_input_thread.daemon = True
-        #get_input_thread.start()
-
+        print("Chat Room: \n")
         while True:
             # Get User Message 
-            tx_chatText = input("Chat Text: ")
+
+            tx_chatText = input()
+            tx_chatText = self.CLIENTNAME+": "+tx_chatText # Placing Name In Front Of Chat Message
             tx_chatTextBytes = tx_chatText.encode('utf-8')
 
             # Send Chat 
@@ -455,9 +445,6 @@ class Client:
             self.tx_multiCastSocket.sendto(tx_chatTextBytes, MULTICAST_ADDRESS_PORT) # CHANGE TO CHAT 
             time.sleep(0.5)
 
-
-            # Receive Chat
-            # self.receive_chat()
 
     
 
