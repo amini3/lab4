@@ -24,10 +24,9 @@ CMD = {
     "getdir"        : b'\x01',
     "makeroom"      : b'\x02',
     "deleteroom"    : b'\x03',
-    "grabserver"    : b'\x04'
+    "grabserver"    : b'\x04',
+    "bye"           : b'\x05'
 }
-
-CLIENT_CMDS = ["connect", "bye", "name", "chat"]
 
 SOCKET_TIMEOUT = 4
 
@@ -169,15 +168,12 @@ class Server:
                     #self.connected_clients.remove(client)
                     #connection.close()
                     #continue
-                # Echo back what we received.
-                #connection.sendall(recvd_bytes)
-                # print("\nEcho: ", recvd_str)
-                # elif cmd == int.from_bytes(CMD['bye'], byteorder='big'):
-                #     print()
-                #     print("Closing {} connection ...".format(address_port))
-                #     self.connected_clients.remove(client)
-                #     connection.close()
-                #     continue
+                elif cmd == int.from_bytes(CMD['bye'], byteorder='big'):
+                    print()
+                    print("Closing {} connection ...".format(address_port))
+                    self.connected_clients.remove(client)
+                    connection.close()
+                    continue
             except socket.error:
                 # If no bytes are available, catch the
                 # exception. Continue on so that we can check
@@ -201,8 +197,8 @@ class Server:
                 port = self.roomDirectory[key]['port']
                 break
             else:
-                 ip = 'NAN'
-                 port = 'NAN'
+                 ip = "NAN"
+                 port = "-111"
 
         IP_pkt = ip.encode(Server.MSG_ENCODING)
         get_IP_size = len(ip.encode(Server.MSG_ENCODING))
@@ -212,6 +208,8 @@ class Server:
         port_pkt = port.encode(Server.MSG_ENCODING)
         get_port_size = len(port.encode(Server.MSG_ENCODING))
         get_port_size_pkt = get_port_size.to_bytes(IP_PORT_LEN,byteorder='big')
+
+        print(ip, port)
 
         pkt = get_IP_size_pkt + IP_pkt + get_port_size_pkt + port_pkt
         connection.sendall(pkt)
@@ -399,12 +397,10 @@ class Client:
                     pass
                 elif(self.input_text=="bye"):
                     # print('Closing connection from the server\n')
-                    # # Send The Bye Packet 
-                    # self.socket.sendall(CMD['bye'])
-                    # self.socket.close()
-                    # self.get_socket()
-                    # return
-                    pass
+                    # Send The Bye Packet 
+                    self.socket.sendall(CMD['bye'])
+                    self.socket.close()
+                    self.get_socket()
                 elif "name" in self.input_text:
                     command_str = self.input_text.split()
                     self.CLIENTNAME = command_str[1] # This Will Be Appended To Every Message That Is Sent
@@ -497,7 +493,7 @@ class Client:
         _, PortBytes = recv_bytes(self.socket, PortSize)
         Port = int(PortBytes.decode(Server.MSG_ENCODING))
 
-        if IPaddress == 'NAN':
+        if IPaddress == "NAN":
             print("Chat Room Not Found!: Try Again\n")
             self.get_console_input()
         
