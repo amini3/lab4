@@ -9,6 +9,7 @@ import time
 import json
 import threading
 import asyncio
+import pprint
 
 ########################################################################
 # Echo Server class
@@ -23,6 +24,7 @@ CMD = {
     "getdir"        : b'\x01',
     "makeroom"      : b'\x02',
     "deleteroom"    : b'\x03',
+    "grabserver"    : b'\x04'
 }
 
 CLIENT_CMDS = ["connect", "bye", "name", "chat"]
@@ -162,17 +164,60 @@ class Server:
                     self.deleteRoom(connection)
                 elif cmd == int.from_bytes(CMD['getdir'], byteorder='big'):
                     self.getDir(connection)
+                elif cmd == int.from_bytes(CMD['grabserver'], byteorder='big'):
+                    self.get_chat_room_info(connection)
                     #self.connected_clients.remove(client)
                     #connection.close()
                     #continue
                 # Echo back what we received.
                 #connection.sendall(recvd_bytes)
                 # print("\nEcho: ", recvd_str)
+                # elif cmd == int.from_bytes(CMD['bye'], byteorder='big'):
+                #     print()
+                #     print("Closing {} connection ...".format(address_port))
+                #     self.connected_clients.remove(client)
+                #     connection.close()
+                #     continue
             except socket.error:
                 # If no bytes are available, catch the
                 # exception. Continue on so that we can check
                 # other connections.
                 pass
+
+    def get_chat_room_info(self, connection):
+        # Decoding Chat Room Name
+        _, chatRoomNameSizeInBytes = recv_bytes(connection, CHATROOMSIZEBYTES)
+        chatRoomNameSize = int.from_bytes(chatRoomNameSizeInBytes, byteorder='big')
+
+        _, chatRoomNameBytes = recv_bytes(connection, chatRoomNameSize)
+        chatRoomName = chatRoomNameBytes.decode(Server.MSG_ENCODING)
+
+        ip = ''
+        port = ''
+        
+        for key, value in self.roomDirectory.items():
+            if value['name'] == chatRoomName:
+                ip = self.roomDirectory[key]['address']
+                port = self.roomDirectory[key]['port']
+                break
+            else:
+                 ip = 'NAN'
+                 port = 'NAN'
+
+        IP_pkt = ip.encode(Server.MSG_ENCODING)
+        get_IP_size = len(ip.encode(Server.MSG_ENCODING))
+        get_IP_size_pkt = get_IP_size.to_bytes(IP_ADDR_LEN,byteorder='big')
+
+        
+        port_pkt = port.encode(Server.MSG_ENCODING)
+        get_port_size = len(port.encode(Server.MSG_ENCODING))
+        get_port_size_pkt = get_port_size.to_bytes(IP_PORT_LEN,byteorder='big')
+
+        pkt = get_IP_size_pkt + IP_pkt + get_port_size_pkt + port_pkt
+        connection.sendall(pkt)
+        return
+        
+
 
     def make_room(self, connection):
         # Decoding Chat Room Name  
@@ -353,6 +398,12 @@ class Client:
                     self.deleteroom(name)
                     pass
                 elif(self.input_text=="bye"):
+                    # print('Closing connection from the server\n')
+                    # # Send The Bye Packet 
+                    # self.socket.sendall(CMD['bye'])
+                    # self.socket.close()
+                    # self.get_socket()
+                    # return
                     pass
                 elif "name" in self.input_text:
                     command_str = self.input_text.split()
@@ -360,17 +411,17 @@ class Client:
                 elif "chat" in self.input_text:
                     command_str = self.input_text.split()
                     name = command_str[1]
-                    self.chatroom()
+                    self.chatroom(name)
                 else:
                     print("Error")
                     
         except KeyboardInterrupt:
             print("program closed")
 
-    def create_recieve_socket(self):
-        MULTICAST_ADDRESS = "239.2.2.2" # TEMPORARY
+    def create_recieve_socket(self, multicast_IP, multicast_PORT):
+        MULTICAST_ADDRESS = multicast_IP # TEMPORARY
         # Binding Socket To Multicast Address
-        RX_BIND_ADDRESS_PORT = (Client.RX_BIND_ADDRESS, 2000)
+        RX_BIND_ADDRESS_PORT = (Client.RX_BIND_ADDRESS, multicast_PORT)
         self.rx_multiCastSocket.bind(RX_BIND_ADDRESS_PORT)
 
         multicast_group_bytes = socket.inet_aton(MULTICAST_ADDRESS)
@@ -414,18 +465,60 @@ class Client:
                 if (rx_ip == tx_ip) and (rx_port == tx_port):
                     pass
                 else:
-                    print("{}\n".format(data.decode('utf-8')))
+                    print("{}".format(data.decode('utf-8')))
+                    print(self.CLIENTNAME + ": ")
 
 
         except Exception as msg:
             print(msg)
             sys.exit(1)
-         
+    
+    def getChatRoomInfo(self, clientName):
+        # Sending Request Packet To Server
+        cmd_byte = CMD['grabserver']
+
+        chatRoomName_pkt = clientName.encode(Server.MSG_ENCODING)
+        get_chatRoomName_size = len(clientName.encode(Server.MSG_ENCODING))
+        get_chatRoomName_size_pkt = get_chatRoomName_size.to_bytes(CHATROOMSIZEBYTES,byteorder='big')
+
+        pkt = cmd_byte+get_chatRoomName_size_pkt+chatRoomName_pkt
+        self.socket.sendall(pkt)
+
+        # Wait & Recv the Chat Room Info Packet From Server
+        # Decoding Multicast I.P address 
+        _, IPaddressSizeInBytes = recv_bytes(self.socket, IP_ADDR_LEN)
+        IPaddressSize = int.from_bytes(IPaddressSizeInBytes, byteorder='big')
+        _, IPaddressBytes = recv_bytes(self.socket, IPaddressSize)
+        IPaddress = IPaddressBytes.decode(Server.MSG_ENCODING)
+        # Decoding Port
+        _, PortSizeInBytes = recv_bytes(self.socket, IP_PORT_LEN)
+        PortSize = int.from_bytes(PortSizeInBytes, byteorder='big')
+
+        _, PortBytes = recv_bytes(self.socket, PortSize)
+        Port = int(PortBytes.decode(Server.MSG_ENCODING))
+
+        if IPaddress == 'NAN':
+            print("Chat Room Not Found!: Try Again\n")
+            self.get_console_input()
         
-    def chatroom(self):
+        
+        return IPaddress, Port
+
+
+        
+
+        
+    def chatroom(self, clientName):
+        # Grabbing chatroom data from server
+        multicast_ip, multicast_port = self.getChatRoomInfo(clientName)
+
+        
         # Intializing RX & TX sockets
+        print("got here")
+        print("created recv sock")
         self.create_send_socket()
-        self.create_recieve_socket()
+        self.create_recieve_socket(multicast_ip, multicast_port)
+        print("created send sock")
         
 
         rx_thread = threading.Thread(target=self.receive_chat, args=())
@@ -433,23 +526,30 @@ class Client:
         rx_thread.start()
 
         print("Chat Room: \n")
-        while True:
-            # Get User Message 
+        try: 
+            while True:
+                # Get User Message 
+                print(self.CLIENTNAME + ": ")
+                tx_chatText = input()
+                
+                tx_chatText = self.CLIENTNAME+": "+tx_chatText # Placing Name In Front Of Chat Message
+                tx_chatTextBytes = tx_chatText.encode('utf-8')
 
-            tx_chatText = input()
-            tx_chatText = self.CLIENTNAME+": "+tx_chatText # Placing Name In Front Of Chat Message
-            tx_chatTextBytes = tx_chatText.encode('utf-8')
+                # Send Chat 
+                ADDRESS_PORT_INFUNC = (multicast_ip, multicast_port) # FIX LATER 
+                self.tx_multiCastSocket.sendto(tx_chatTextBytes, ADDRESS_PORT_INFUNC) # CHANGE TO CHAT 
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("\nCtrl+C detected. Program will continue")
+            #self.rx_multiCastSocket.close()
+            #self.tx_multiCastSocket.close()
+            self.get_console_input()
 
-            # Send Chat 
-            MULTICAST_ADDRESS_PORT = ("239.2.2.2", 2000) # FIX LATER 
-            self.tx_multiCastSocket.sendto(tx_chatTextBytes, MULTICAST_ADDRESS_PORT) # CHANGE TO CHAT 
-            time.sleep(0.5)
-
-
-    
 
             
 
+        
+            
 
 
     def makeroom(self, chatRoomName, ip, port):
@@ -500,7 +600,11 @@ class Client:
 
         # Read the received message as JSON.
         dir_object = json.loads(dir_data_decoded)
-        print(dir_object)
+
+        # Pretty Printing
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint(dir_object)
+        # print(dir_object)
 
 
         
