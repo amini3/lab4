@@ -240,14 +240,23 @@ class Server:
         Port = PortBytes.decode(Server.MSG_ENCODING) 
 
         # Updating Our Global Directory
-        self.updateDir(chatRoomName, IPaddress, Port) 
+        self.updateDir(chatRoomName, IPaddress, Port, connection) 
         return
 
          
 
-    def updateDir(self, name, address, port):
+    def updateDir(self, name, address, port, connection):
         
         dirSize = len(self.roomDirectory)
+        flag = 1
+
+        for dir_id, dir_info in self.roomDirectory.items():
+            if (self.roomDirectory[dir_id]['address'] == address or self.roomDirectory[dir_id]['port'] == port):
+                flag = 0
+                flag_bytes = flag.to_bytes(1, byteorder='big')
+                print(flag_bytes)
+                connection.sendall(flag_bytes)
+                return
 
         self.roomDirectory[dirSize] = {}
         
@@ -255,11 +264,10 @@ class Server:
         self.roomDirectory[dirSize]['address'] = address
         self.roomDirectory[dirSize]['port'] = port
 
-        # for dir_id, dir_info in self.roomDirectory.items():
-        #     print("\nChat Room", str(dir_id) + ":")
+        flag_bytes = flag.to_bytes(1, byteorder='big')
+        connection.sendall(flag_bytes)
 
-        #     for key in dir_info:
-        #         print('\t'+ key + ':', dir_info[key])
+
 
         return
 
@@ -510,11 +518,9 @@ class Client:
 
         
         # Intializing RX & TX sockets
-        print("got here")
-        print("created recv sock")
         self.create_send_socket()
         self.create_recieve_socket(multicast_ip, multicast_port)
-        print("created send sock")
+       
         
 
         rx_thread = threading.Thread(target=self.receive_chat, args=())
@@ -569,6 +575,16 @@ class Client:
         pkt = cmd_field + get_chatRoomName_size_pkt + chatRoomName_pkt + get_IP_size_pkt + IP_pkt + get_port_size_pkt + port_pkt
 
         self.socket.sendall(pkt)
+
+        # Wait For ACK packet
+        _, ACKBytes = recv_bytes(self.socket, 1)
+        ACK = int.from_bytes(ACKBytes, byteorder='big')
+
+        if ACK == 1:
+            print("Make Room Succesful!")
+        elif ACK == 0:
+            print("Make Room Fail!")
+        
         return
 
     def deleteroom(self, chatRoomName):
@@ -603,37 +619,6 @@ class Client:
         # print(dir_object)
 
 
-        
-    def connection_send(self):
-        try:
-            # Send string objects over the connection. The string must
-            # be encoded into bytes objects first.
-            self.socket.sendall(self.input_text.encode(Server.MSG_ENCODING))
-        except Exception as msg:
-            print(msg)
-            sys.exit(1)
-
-
-    def connection_receive(self):
-        try:
-            # Receive and print out text. The received bytes objects
-            # must be decoded into string objects.
-            recvd_bytes = self.socket.recv(Client.RECV_BUFFER_SIZE)
-
-            # recv will block if nothing is available. If we receive
-            # zero bytes, the connection has been closed from the
-            # other end. In that case, close the connection on this
-            # end and exit.
-            if len(recvd_bytes) == 0:
-                print("Closing server connection ... ")
-                self.socket.close()
-                sys.exit(1)
-
-            print("Received: ", recvd_bytes.decode(Server.MSG_ENCODING))
-
-        except Exception as msg:
-            print(msg)
-            sys.exit(1)
 
 ########################################################################
 
