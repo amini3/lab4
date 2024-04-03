@@ -209,8 +209,6 @@ class Server:
         get_port_size = len(port.encode(Server.MSG_ENCODING))
         get_port_size_pkt = get_port_size.to_bytes(IP_PORT_LEN,byteorder='big')
 
-        print(ip, port)
-
         pkt = get_IP_size_pkt + IP_pkt + get_port_size_pkt + port_pkt
         connection.sendall(pkt)
         return
